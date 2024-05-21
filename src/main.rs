@@ -136,7 +136,7 @@ async fn generate_toc() -> Result<Book, Box<dyn Error>> {
     let prompt = format!("Write the book's outline, output ONLY the json, no extra text, do not output markdown, just the JSON and follow the template provided.\n\nThe book must include, the anatomy, pathology, physiology, biochemistry, diseases (at least 5 different diseases), diagnostic tools (including made up tools) and treatments (made up techniques). Add many subtitles to each subsection.\n\n{}", line);
     let request = CreateChatCompletionRequestArgs::default()
     .max_tokens(4096u16)
-    .model("gpt-4-0613")
+    .model("gpt-4o")
     .messages([
         ChatCompletionRequestMessageArgs::default()
             .role(Role::System)
@@ -437,7 +437,7 @@ async fn translate_book(book: &Book) -> Result<Book, Box<dyn Error>> {
 
                 let request = CreateChatCompletionRequestArgs::default()
                     .max_tokens(4096u16)
-                    .model("gpt-4-1106-preview")
+                    .model("gpt-4o")
                     .messages([
                         ChatCompletionRequestMessageArgs::default()
                             .role(Role::System)
@@ -500,7 +500,7 @@ async fn generate_book(mut toc: Book) -> Result<Book, Box<dyn Error>> {
                 };
                 let request = CreateChatCompletionRequestArgs::default()
                     .max_tokens(4096u16)
-                    .model("gpt-4-1106-preview")
+                    .model("gpt-4o")
                     .messages([
                         ChatCompletionRequestMessageArgs::default()
                             .role(Role::System)
