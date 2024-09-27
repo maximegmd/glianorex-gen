@@ -64,6 +64,7 @@ pub struct QAMultiLang {
 pub enum Model {
     GPT4,
     GPT4O,
+    GPT35,
     CLAUDE35SONNET
 }
 

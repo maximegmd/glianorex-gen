@@ -16,12 +16,12 @@ use rand::Rng;
 use serde_json::json;
 
 
-use crate::common::{Book, Section, SubSection, SubSubSection, QA, QAMultiLang, Model, get_context};
+use crate::common::{Book, Section, SubSection, SubSubSection, QA, QAMultiLang, get_context};
 
 use anthropic_sdk::Client;
 
 
-pub async fn generate_toc(_model: Model) -> Result<Book, Box<dyn Error>> {
+pub async fn generate_toc() -> Result<Book, Box<dyn Error>> {
     let mut toc_file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -143,63 +143,65 @@ pub async fn generate_qa(en_book: &Book, fr_book: &Book) -> Result<(), Box<dyn E
     for s_index in 0..en_book.sections.len() {
         for ss_index in 0..en_book.sections[s_index].subsections.len() {
             for sss_index in 0..en_book.sections[s_index].subsections[ss_index].subtitles.len() {
+                loop {
+                    let data: Arc<Mutex<QAMultiLang>> = Arc::new(Mutex::new(QAMultiLang {
+                        en_context: en_book.sections[s_index].subsections[ss_index].subtitles[sss_index].content.clone().unwrap_or("".into()),
+                        fr_context: fr_book.sections[s_index].subsections[ss_index].subtitles[sss_index].content.clone().unwrap_or("".into()),
+                        ..Default::default()
+                    }));
 
-                let data: Arc<Mutex<QAMultiLang>> = Arc::new(Mutex::new(QAMultiLang {
-                    en_context: en_book.sections[s_index].subsections[ss_index].subtitles[sss_index].content.clone().unwrap_or("".into()),
-                    fr_context: fr_book.sections[s_index].subsections[ss_index].subtitles[sss_index].content.clone().unwrap_or("".into()),
-                    ..Default::default()
-                }));
+                    let prompt = format!("You are a helpful assistant helping generate knowledge on a fictional organ and its associated diseases. You are tasked with transforming the existing text to generate variations to help learn the content.\n\nGenerate a very complicated multiple choice question requiring multiple steps of reasoning with 4 options based on the provided text below, these are not reading questions but a test to ensure the student understands and knows the content, it doesn't have to be a clinical vignette. The answers should be roughly the same length and same complexity. Here is an example json output, match this format ```json\n{{\"question\",\"The question content\",\"choices\":[\"(A) Answer option A\", \"(B) Answer option B\", \"(C) Answer option C\", \"(D) Answer option D\"], \"solution\":\"(D) Answer option D\"}}\n```\nText:\n{}", &data.lock().await.en_context);
+                    let secret_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
 
-                let prompt = format!("You are a helpful assistant helping generate knowledge on a fictional organ and its associated diseases. You are tasked with transforming the existing text to generate variations to help learn the content.\n\nGenerate a very complicated multiple choice question requiring multiple steps of reasoning with 4 options based on the provided text below, these are not reading questions but a test to ensure the student understands and knows the content, it doesn't have to be a clinical vignette. The answers should be roughly the same length and same complexity. Here is an example json output, match this format ```json\n{{\"question\",\"The question content\",\"choices\":[\"(A) Answer option A\", \"(B) Answer option B\", \"(C) Answer option C\", \"(D) Answer option D\"], \"solution\":\"(D) Answer option D\"}}\n```\nText:\n{}", &data.lock().await.en_context);
-                let secret_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+                    let request = Client::new()
+                        .version("2023-06-01")
+                        .auth(secret_key.as_str())
+                        .model("claude-3-5-sonnet-20240620")
+                        .temperature(1f32)
+                        .messages(&json!([
+                            {"role": "user", "content": prompt.clone()}
+                        ]))
+                        .max_tokens(4096)
+                        .build()?;
 
-                let request = Client::new()
-                    .version("2023-06-01")
-                    .auth(secret_key.as_str())
-                    .model("claude-3-5-sonnet-20240620")
-                    .temperature(1f32)
-                    .messages(&json!([
-                        {"role": "user", "content": prompt.clone()}
-                    ]))
-                    .max_tokens(4096)
-                    .build()?;
-
-                if let Err(err) = request.execute(
-                    |text| { 
-                            let value = data.clone();
-                            async move {
-                                let mut content = text.clone();
-                                let start = content.find("```json\n");
-                                if let Some(start) = start {
-                                    content = content[start+8..].to_string();
+                    if let Err(err) = request.execute(
+                        |text| { 
+                                let value = data.clone();
+                                async move {
+                                    let mut content = text.clone();
+                                    let start = content.find("```json\n");
+                                    if let Some(start) = start {
+                                        content = content[start+8..].to_string();
+                                    }
+                                    let end = content.find("```");
+                                    if let Some(end) = end {
+                                        content = content[..end].to_string();
+                                    }
+                                    
+                                    let qa = serde_json::from_str::<QA>(&content);
+                                    if let Ok(qa) = qa {
+                                        let mut val = value.lock().await;
+                                        val.en_question = qa;
+                                    } else {
+                                        println!("Error: {:?}", qa.err());
+                                        println!("Content: {:?}", content);
+                                    }
                                 }
-                                let end = content.find("```");
-                                if let Some(end) = end {
-                                    content = content[..end].to_string();
-                                }
-                                
-                                let qa = serde_json::from_str::<QA>(&content);
-                                if let Ok(qa) = qa {
-                                    let mut val = value.lock().await;
-                                    val.en_question = qa;
-                                } else {
-                                    println!("Error: {:?}", qa.err());
-                                    println!("Content: {:?}", content);
-                                }
-                            }
-                        }).await
-                {
-                    println!("Error: {:?}", err);
+                            }).await
+                    {
+                        println!("Error: {:?}", err);
+                    } else {
+                        let line = {
+                            let qa: tokio::sync::MutexGuard<QAMultiLang> = data.lock().await;
+                            serde_json::to_string(&qa.en_question).unwrap()
+                        };
+
+                        writeln!(en_result_file, "{}", line).expect("Failed to write to disk!");
+
+                        questions.push(data);
+                        break;
+                    }
                 }
-
-                let line = {
-                    let qa: tokio::sync::MutexGuard<QAMultiLang> = data.lock().await;
-                    serde_json::to_string(&qa.en_question).unwrap()
-                };
-
-                writeln!(en_result_file, "{}", line).expect("Failed to write to disk!");
-
-                questions.push(data);
             }
         }
     }
@@ -212,63 +214,68 @@ pub async fn generate_qa(en_book: &Book, fr_book: &Book) -> Result<(), Box<dyn E
         .expect("cannot open file");
 
     for qa in tqdm(questions.iter()) {
-        let line = {
-            let qa: tokio::sync::MutexGuard<QAMultiLang> = qa.lock().await;
-            serde_json::to_string(&qa.en_question).unwrap()
-        };
+        loop {
+            let line = {
+                let qa: tokio::sync::MutexGuard<QAMultiLang> = qa.lock().await;
+                serde_json::to_string(&qa.en_question).unwrap()
+            };
 
-        let context = {
-            let qa: tokio::sync::MutexGuard<QAMultiLang> = qa.lock().await;
-            qa.fr_context.clone()
-        };
+            let context = {
+                let qa: tokio::sync::MutexGuard<QAMultiLang> = qa.lock().await;
+                qa.fr_context.clone()
+            };
 
-        let prompt = "Translate the question in French, while retaining the same format. To assist you here is the relevant context in French:\n\n".to_string() + context.as_str() + "\n\n" + "Question:\n" + line.as_str() + "\n\nOutput the json directly.";
-        let secret_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+            let prompt = "Translate the question in French, while retaining the same format. To assist you here is the relevant context in French:\n\n".to_string() + context.as_str() + "\n\n" + "Question:\n" + line.as_str() + "\n\nOutput the json directly.";
+            let secret_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
 
-        let request = Client::new()
-            .version("2023-06-01")
-            .auth(secret_key.as_str())
-            .model("claude-3-5-sonnet-20240620")
-            .messages(&json!([
-                {"role": "user", "content": prompt.clone()}
-            ]))
-            .max_tokens(4096)
-            .build()?;
+            let request = Client::new()
+                .version("2023-06-01")
+                .auth(secret_key.as_str())
+                .model("claude-3-5-sonnet-20240620")
+                .messages(&json!([
+                    {"role": "user", "content": prompt.clone()}
+                ]))
+                .max_tokens(4096)
+                .build()?;
 
-        if let Err(err) = request.execute(
-            |text| { 
-                let value = qa.clone();
-                async move {
-                    let mut content = text.clone();
-                    let start = content.find("{");
-                    if let Some(start) = start {
-                        content = content[start..].to_string();
+            if let Err(err) = request.execute(
+                |text| { 
+                    let value = qa.clone();
+                    async move {
+                        let mut content = text.clone();
+                        let start = content.find("{");
+                        if let Some(start) = start {
+                            content = content[start..].to_string();
+                        }
+                        let end = content.rfind("}");
+                        if let Some(end) = end {
+                            content = content[..end+1].to_string();
+                        }
+                        
+                        let qa = serde_json::from_str::<QA>(&content);
+                        if let Ok(qa) = qa {
+                            let mut val = value.lock().await;
+                            val.fr_question = qa;
+                        } else {
+                            println!("Error: {:?}", qa.err());
+                            println!("Content: {:?}", content);
+                        }
                     }
-                    let end = content.rfind("}");
-                    if let Some(end) = end {
-                        content = content[..end+1].to_string();
-                    }
-                    
-                    let qa = serde_json::from_str::<QA>(&content);
-                    if let Ok(qa) = qa {
-                        let mut val = value.lock().await;
-                        val.fr_question = qa;
-                    } else {
-                        println!("Error: {:?}", qa.err());
-                        println!("Content: {:?}", content);
-                    }
-                }
-            }).await
-        {
-            println!("Error: {:?}", err);
+                }).await
+            {
+                println!("Error: {:?}", err);
+            } else {
+
+                let line = {
+                    let qa: tokio::sync::MutexGuard<QAMultiLang> = qa.lock().await;
+                    serde_json::to_string(&qa.fr_question).unwrap()
+                };
+
+                writeln!(fr_result_file, "{}", line).expect("Failed to write to disk!");
+
+                break;
+            }
         }
-
-        let line = {
-            let qa: tokio::sync::MutexGuard<QAMultiLang> = qa.lock().await;
-            serde_json::to_string(&qa.fr_question).unwrap()
-        };
-
-        writeln!(fr_result_file, "{}", line).expect("Failed to write to disk!");
     }
 
     Ok(())

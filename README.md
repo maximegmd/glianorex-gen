@@ -23,7 +23,7 @@ In addition, a `generator` column contains the name of the model used to generat
 
 1) Run `cargo build`
 2) Set your OpenAI API key, `export OPENAI_API_KEY=sk-...` or Anthropic API key `export ANTHROPIC_API_KEY=...`
-3) Run `cargo run <model>` with `model` being one of `gpt4`, `gpt35` or `claude35sonnet`.
+3) Run `cargo run <model>` with `model` being one of GPT models (for example `gpt-4`, `gpt-3.5-turbo`) or `claude`.
 
 Multiple `.json` files will be generated containing the different data generated.
 

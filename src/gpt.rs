@@ -21,7 +21,7 @@ use async_openai::{
     Client,
 };
 
-pub async fn generate_toc(model: Model) -> Result<Book, Box<dyn Error>> {
+pub async fn generate_toc(model: &String) -> Result<Book, Box<dyn Error>> {
     let mut toc_file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -84,7 +84,7 @@ pub async fn generate_toc(model: Model) -> Result<Book, Box<dyn Error>> {
 
     let request = CreateChatCompletionRequestArgs::default()
     .max_tokens(4096u16)
-    .model(if model == Model::GPT4 { "gpt-4-turbo" } else { "gpt-4o" })
+    .model(model)
     .messages([
         ChatCompletionRequestMessageArgs::default()
             .role(Role::System)
@@ -122,7 +122,7 @@ pub async fn generate_toc(model: Model) -> Result<Book, Box<dyn Error>> {
     Ok(toc)
 }
 
-pub async fn generate_qa(en_book: &Book, fr_book: &Book) {
+pub async fn generate_qa(model: &String, en_book: &Book, fr_book: &Book) {
 
     const WORKER_COUNT: usize = 4;
 
@@ -143,7 +143,7 @@ pub async fn generate_qa(en_book: &Book, fr_book: &Book) {
                 let prompt = format!("Generate a very complicated multiple choice question requiring multiple steps of reasoning with 4 options based on the provided text below, these are not reading questions but a test to ensure the student understands and knows the content, it doesn't have to be a clinical vignette. The answers should be roughly the same length and same complexity. Here is an example json output, match this format ```json\n{{\"question\",\"The question content\",\"choices\":[\"(A) Answer option A\", \"(B) Answer option B\", \"(C) Answer option C\", \"(D) Answer option D\"], \"solution\":\"(D) Answer option D\"}}\n```\nText:\n{}", &data.en_context);
                 let request = CreateChatCompletionRequestArgs::default()
                 .max_tokens(4096u16)
-                .model("gpt-4o")
+                .model(model)
                 .temperature(1.0f32)
                 .messages([
                     ChatCompletionRequestMessageArgs::default()
@@ -157,10 +157,7 @@ pub async fn generate_qa(en_book: &Book, fr_book: &Book) {
                 ])
                 .build().expect("Failed to build CreateChatCompletionRequestArgs");
 
-                println!("{:?}", &request);
-                return;
-
-            en_requests.write().await.add((data, request)).expect("Could not add to queue");
+                en_requests.write().await.add((data, request)).expect("Could not add to queue");
             }
         }
     }
@@ -321,7 +318,7 @@ pub async fn generate_qa(en_book: &Book, fr_book: &Book) {
     }
 }
 
-pub async fn translate_book(book: &Book) -> Result<Book, Box<dyn Error>> {
+pub async fn translate_book(model: &String, book: &Book) -> Result<Book, Box<dyn Error>> {
 
     let mut translated_book = book.clone();
     let ctx = get_context(&book);
@@ -344,7 +341,7 @@ pub async fn translate_book(book: &Book) -> Result<Book, Box<dyn Error>> {
 
                 let request = CreateChatCompletionRequestArgs::default()
                     .max_tokens(4096u16)
-                    .model("gpt-4o")
+                    .model(model)
                     .messages([
                         ChatCompletionRequestMessageArgs::default()
                             .role(Role::System)
@@ -386,7 +383,7 @@ pub async fn translate_book(book: &Book) -> Result<Book, Box<dyn Error>> {
 }
 
 
-async fn generate_book(mut toc: Book) -> Result<Book, Box<dyn Error>> {
+pub async fn generate_book(model: &String, mut toc: Book) -> Result<Book, Box<dyn Error>> {
 
     let ctx = get_context(&toc);
 
@@ -407,7 +404,7 @@ async fn generate_book(mut toc: Book) -> Result<Book, Box<dyn Error>> {
                 };
                 let request = CreateChatCompletionRequestArgs::default()
                     .max_tokens(4096u16)
-                    .model("gpt-4o")
+                    .model(model)
                     .messages([
                         ChatCompletionRequestMessageArgs::default()
                             .role(Role::System)
